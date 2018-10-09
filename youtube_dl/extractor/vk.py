@@ -1,9 +1,8 @@
-# encoding: utf-8
+# coding: utf-8
 from __future__ import unicode_literals
 
 import collections
 import re
-import json
 import sys
 
 from .common import InfoExtractor
@@ -18,20 +17,24 @@ from ..utils import (
     int_or_none,
     orderedSet,
     remove_start,
+    str_or_none,
     str_to_int,
     unescapeHTML,
-    unified_strdate,
+    unified_timestamp,
+    url_or_none,
     urlencode_postdata,
 )
-from .vimeo import VimeoIE
+from .dailymotion import DailymotionIE
 from .pladform import PladformIE
+from .vimeo import VimeoIE
+from .youtube import YoutubeIE
 
 
 class VKBaseIE(InfoExtractor):
     _NETRC_MACHINE = 'vk'
 
     def _login(self):
-        (username, password) = self._get_login_info()
+        username, password = self._get_login_info()
         if username is None:
             return
 
@@ -66,7 +69,7 @@ class VKBaseIE(InfoExtractor):
 
         login_page = self._download_webpage(
             'https://login.vk.com/?act=login', None,
-            note='Logging in as %s' % username,
+            note='Logging in',
             data=urlencode_postdata(login_form))
 
         if re.search(r'onLoginFailed', login_page):
@@ -98,15 +101,16 @@ class VKIE(VKBaseIE):
     _TESTS = [
         {
             'url': 'http://vk.com/videos-77521?z=video-77521_162222515%2Fclub77521',
-            'md5': '0deae91935c54e00003c2a00646315f0',
+            'md5': '7babad3b85ea2e91948005b1b8b0cb84',
             'info_dict': {
                 'id': '162222515',
-                'ext': 'flv',
+                'ext': 'mp4',
                 'title': 'ProtivoGunz - Хуёвая песня',
                 'uploader': 're:(?:Noize MC|Alexander Ilyashenko).*',
+                'uploader_id': '-77521',
                 'duration': 195,
+                'timestamp': 1329049880,
                 'upload_date': '20120212',
-                'view_count': int,
             },
         },
         {
@@ -115,11 +119,12 @@ class VKIE(VKBaseIE):
             'info_dict': {
                 'id': '165548505',
                 'ext': 'mp4',
-                'uploader': 'Tom Cruise',
                 'title': 'No name',
+                'uploader': 'Tom Cruise',
+                'uploader_id': '205387401',
                 'duration': 9,
-                'upload_date': '20130721',
-                'view_count': int,
+                'timestamp': 1374364108,
+                'upload_date': '20130720',
             }
         },
         {
@@ -194,6 +199,7 @@ class VKIE(VKBaseIE):
                 'upload_date': '20150709',
                 'view_count': int,
             },
+            'skip': 'Removed',
         },
         {
             # youtube embed
@@ -202,12 +208,30 @@ class VKIE(VKBaseIE):
                 'id': 'V3K4mi0SYkc',
                 'ext': 'webm',
                 'title': "DSWD Awards 'Children's Joy Foundation, Inc.' Certificate of Registration and License to Operate",
-                'description': 'md5:d9903938abdc74c738af77f527ca0596',
-                'duration': 178,
+                'description': 'md5:bf9c26cfa4acdfb146362682edd3827a',
+                'duration': 179,
                 'upload_date': '20130116',
-                'uploader': "Children's Joy Foundation",
+                'uploader': "Children's Joy Foundation Inc.",
                 'uploader_id': 'thecjf',
                 'view_count': int,
+            },
+        },
+        {
+            # dailymotion embed
+            'url': 'https://vk.com/video-37468416_456239855',
+            'info_dict': {
+                'id': 'k3lz2cmXyRuJQSjGHUv',
+                'ext': 'mp4',
+                'title': 'md5:d52606645c20b0ddbb21655adaa4f56f',
+                # TODO: fix test by fixing dailymotion description extraction
+                'description': 'md5:c651358f03c56f1150b555c26d90a0fd',
+                'uploader': 'AniLibria.Tv',
+                'upload_date': '20160914',
+                'uploader_id': 'x1p5vl5',
+                'timestamp': 1473877246,
+            },
+            'params': {
+                'skip_download': True,
             },
         },
         {
@@ -219,9 +243,32 @@ class VKIE(VKBaseIE):
                 'ext': 'mp4',
                 'title': 'S-Dance, репетиции к The way show',
                 'uploader': 'THE WAY SHOW | 17 апреля',
+                'uploader_id': '-110305615',
+                'timestamp': 1454859345,
                 'upload_date': '20160207',
+            },
+            'params': {
+                'skip_download': True,
+            },
+        },
+        {
+            # finished live stream, postlive_mp4
+            'url': 'https://vk.com/videos-387766?z=video-387766_456242764%2Fpl_-387766_-2',
+            'md5': '90d22d051fccbbe9becfccc615be6791',
+            'info_dict': {
+                'id': '456242764',
+                'ext': 'mp4',
+                'title': 'ИгроМир 2016 — день 1',
+                'uploader': 'Игромания',
+                'duration': 5239,
                 'view_count': int,
             },
+        },
+        {
+            # live stream, hls and rtmp links, most likely already finished live
+            # stream by the time you are reading this comment
+            'url': 'https://vk.com/video-140332_456239111',
+            'only_matching': True,
         },
         {
             # removed video, just testing that we match the pattern
@@ -241,6 +288,11 @@ class VKIE(VKBaseIE):
         {
             'url': 'http://new.vk.com/video205387401_165548505',
             'only_matching': True,
+        },
+        {
+            # This video is no longer available, because its author has been blocked.
+            'url': 'https://vk.com/video-10639516_456240611',
+            'only_matching': True,
         }
     ]
 
@@ -249,7 +301,7 @@ class VKIE(VKBaseIE):
         video_id = mobj.group('videoid')
 
         if video_id:
-            info_url = 'https://vk.com/al_video.php?act=show&al=1&module=video&video=%s' % video_id
+            info_url = 'https://vk.com/al_video.php?act=show_inline&al=1&video=' + video_id
             # Some videos (removed?) can only be downloaded with list id specified
             list_id = mobj.group('list_id')
             if list_id:
@@ -272,9 +324,14 @@ class VKIE(VKBaseIE):
                 'You are trying to log in from an unusual location. You should confirm ownership at vk.com to log in with this IP.',
                 expected=True)
 
+        ERROR_COPYRIGHT = 'Video %s has been removed from public access due to rightholder complaint.'
+
         ERRORS = {
             r'>Видеозапись .*? была изъята из публичного доступа в связи с обращением правообладателя.<':
-            'Video %s has been removed from public access due to rightholder complaint.',
+            ERROR_COPYRIGHT,
+
+            r'>The video .*? was removed from public access by request of the copyright holder.<':
+            ERROR_COPYRIGHT,
 
             r'<!>Please log in or <':
             'Video %s is only available for registered users, '
@@ -288,19 +345,26 @@ class VKIE(VKBaseIE):
 
             r'<!>Access denied':
             'Access denied to video %s.',
+
+            r'<!>Видеозапись недоступна, так как её автор был заблокирован.':
+            'Video %s is no longer available, because its author has been blocked.',
+
+            r'<!>This video is no longer available, because its author has been blocked.':
+            'Video %s is no longer available, because its author has been blocked.',
+
+            r'<!>This video is no longer available, because it has been deleted.':
+            'Video %s is no longer available, because it has been deleted.',
         }
 
         for error_re, error_msg in ERRORS.items():
             if re.search(error_re, info_page):
                 raise ExtractorError(error_msg % video_id, expected=True)
 
-        youtube_url = self._search_regex(
-            r'<iframe[^>]+src="((?:https?:)?//www.youtube.com/embed/[^"]+)"',
-            info_page, 'youtube iframe', default=None)
+        youtube_url = YoutubeIE._extract_url(info_page)
         if youtube_url:
-            return self.url_result(youtube_url, 'Youtube')
+            return self.url_result(youtube_url, ie=YoutubeIE.ie_key())
 
-        vimeo_url = VimeoIE._extract_vimeo_url(url, info_page)
+        vimeo_url = VimeoIE._extract_url(url, info_page)
         if vimeo_url is not None:
             return self.url_result(vimeo_url)
 
@@ -315,6 +379,10 @@ class VKIE(VKBaseIE):
                 m_rutube.group(1).replace('\\', ''))
             return self.url_result(rutube_url)
 
+        dailymotion_urls = DailymotionIE._extract_urls(info_page)
+        if dailymotion_urls:
+            return self.url_result(dailymotion_urls[0], DailymotionIE.ie_key())
+
         m_opts = re.search(r'(?s)var\s+opts\s*=\s*({.+?});', info_page)
         if m_opts:
             m_opts_url = re.search(r"url\s*:\s*'((?!/\b)[^']+)", m_opts.group(1))
@@ -324,46 +392,84 @@ class VKIE(VKBaseIE):
                     opts_url = 'http:' + opts_url
                 return self.url_result(opts_url)
 
-        data_json = self._search_regex(r'var\s+vars\s*=\s*({.+?});', info_page, 'vars')
-        data = json.loads(data_json)
+        # vars does not look to be served anymore since 24.10.2016
+        data = self._parse_json(
+            self._search_regex(
+                r'var\s+vars\s*=\s*({.+?});', info_page, 'vars', default='{}'),
+            video_id, fatal=False)
 
-        # Extract upload date
-        upload_date = None
-        mobj = re.search(r'id="mv_date(?:_views)?_wrap"[^>]*>([a-zA-Z]+ [0-9]+), ([0-9]+) at', info_page)
-        if mobj is not None:
-            mobj.group(1) + ' ' + mobj.group(2)
-            upload_date = unified_strdate(mobj.group(1) + ' ' + mobj.group(2))
+        # <!json> is served instead
+        if not data:
+            data = self._parse_json(
+                self._search_regex(
+                    [r'<!json>\s*({.+?})\s*<!>', r'<!json>\s*({.+})'],
+                    info_page, 'json', default='{}'),
+                video_id)
+            if data:
+                data = data['player']['params'][0]
 
-        view_count = None
-        views = self._html_search_regex(
-            r'"mv_views_count_number"[^>]*>(.+?\bviews?)<',
-            info_page, 'view count', default=None)
-        if views:
-            view_count = str_to_int(self._search_regex(
-                r'([\d,.]+)', views, 'view count', fatal=False))
+        if not data:
+            data = self._parse_json(
+                self._search_regex(
+                    r'var\s+playerParams\s*=\s*({.+?})\s*;\s*\n', info_page,
+                    'player params'),
+                video_id)['params'][0]
+
+        title = unescapeHTML(data['md_title'])
+
+        # 2 = live
+        # 3 = post live (finished live)
+        is_live = data.get('live') == 2
+        if is_live:
+            title = self._live_title(title)
+
+        timestamp = unified_timestamp(self._html_search_regex(
+            r'class=["\']mv_info_date[^>]+>([^<]+)(?:<|from)', info_page,
+            'upload date', default=None)) or int_or_none(data.get('date'))
+
+        view_count = str_to_int(self._search_regex(
+            r'class=["\']mv_views_count[^>]+>\s*([\d,.]+)',
+            info_page, 'view count', default=None))
 
         formats = []
-        for k, v in data.items():
-            if not k.startswith('url') and not k.startswith('cache') and k != 'extra_data' or not v:
+        for format_id, format_url in data.items():
+            format_url = url_or_none(format_url)
+            if not format_url or not format_url.startswith(('http', '//', 'rtmp')):
                 continue
-            height = int_or_none(self._search_regex(
-                r'^(?:url|cache)(\d+)', k, 'height', default=None))
-            formats.append({
-                'format_id': k,
-                'url': v,
-                'height': height,
-            })
+            if (format_id.startswith(('url', 'cache')) or
+                    format_id in ('extra_data', 'live_mp4', 'postlive_mp4')):
+                height = int_or_none(self._search_regex(
+                    r'^(?:url|cache)(\d+)', format_id, 'height', default=None))
+                formats.append({
+                    'format_id': format_id,
+                    'url': format_url,
+                    'height': height,
+                })
+            elif format_id == 'hls':
+                formats.extend(self._extract_m3u8_formats(
+                    format_url, video_id, 'mp4', 'm3u8_native',
+                    m3u8_id=format_id, fatal=False, live=is_live))
+            elif format_id == 'rtmp':
+                formats.append({
+                    'format_id': format_id,
+                    'url': format_url,
+                    'ext': 'flv',
+                })
         self._sort_formats(formats)
 
         return {
-            'id': compat_str(data['vid']),
+            'id': compat_str(data.get('vid') or video_id),
             'formats': formats,
-            'title': unescapeHTML(data['md_title']),
+            'title': title,
             'thumbnail': data.get('jpg'),
             'uploader': data.get('md_author'),
+            'uploader_id': str_or_none(data.get('author_id')),
             'duration': data.get('duration'),
-            'upload_date': upload_date,
+            'timestamp': timestamp,
             'view_count': view_count,
+            'like_count': int_or_none(data.get('liked')),
+            'dislike_count': int_or_none(data.get('nolikes')),
+            'is_live': is_live,
         }
 
 

@@ -7,12 +7,13 @@ from .common import InfoExtractor
 from ..utils import (
     ExtractorError,
     int_or_none,
+    url_or_none,
 )
 
 
 class AolIE(InfoExtractor):
     IE_NAME = 'on.aol.com'
-    _VALID_URL = r'(?:aol-video:|https?://on\.aol\.com/(?:[^/]+/)*(?:[^/?#&]+-)?)(?P<id>[^/?#&]+)'
+    _VALID_URL = r'(?:aol-video:|https?://(?:(?:www|on)\.)?aol\.com/(?:[^/]+/)*(?:[^/?#&]+-)?)(?P<id>[^/?#&]+)'
 
     _TESTS = [{
         # video with 5min ID
@@ -33,7 +34,7 @@ class AolIE(InfoExtractor):
         }
     }, {
         # video with vidible ID
-        'url': 'http://on.aol.com/video/netflix-is-raising-rates-5707d6b8e4b090497b04f706?context=PC:homepage:PL1944:1460189336183',
+        'url': 'http://www.aol.com/video/view/netflix-is-raising-rates/5707d6b8e4b090497b04f706/',
         'info_dict': {
             'id': '5707d6b8e4b090497b04f706',
             'ext': 'mp4',
@@ -77,7 +78,7 @@ class AolIE(InfoExtractor):
             formats.extend(self._extract_m3u8_formats(
                 m3u8_url, video_id, 'mp4', m3u8_id='hls', fatal=False))
         for rendition in video_data.get('renditions', []):
-            video_url = rendition.get('url')
+            video_url = url_or_none(rendition.get('url'))
             if not video_url:
                 continue
             ext = rendition.get('format')
@@ -108,30 +109,3 @@ class AolIE(InfoExtractor):
             'uploader': video_data.get('videoOwner'),
             'formats': formats,
         }
-
-
-class AolFeaturesIE(InfoExtractor):
-    IE_NAME = 'features.aol.com'
-    _VALID_URL = r'https?://features\.aol\.com/video/(?P<id>[^/?#]+)'
-
-    _TESTS = [{
-        'url': 'http://features.aol.com/video/behind-secret-second-careers-late-night-talk-show-hosts',
-        'md5': '7db483bb0c09c85e241f84a34238cc75',
-        'info_dict': {
-            'id': '519507715',
-            'ext': 'mp4',
-            'title': 'What To Watch - February 17, 2016',
-        },
-        'add_ie': ['FiveMin'],
-        'params': {
-            # encrypted m3u8 download
-            'skip_download': True,
-        },
-    }]
-
-    def _real_extract(self, url):
-        display_id = self._match_id(url)
-        webpage = self._download_webpage(url, display_id)
-        return self.url_result(self._search_regex(
-            r'<script type="text/javascript" src="(https?://[^/]*?5min\.com/Scripts/PlayerSeed\.js[^"]+)"',
-            webpage, '5min embed url'), 'FiveMin')

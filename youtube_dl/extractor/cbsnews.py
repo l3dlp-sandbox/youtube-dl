@@ -1,4 +1,4 @@
-# encoding: utf-8
+# coding: utf-8
 from __future__ import unicode_literals
 
 from .common import InfoExtractor
@@ -9,24 +9,29 @@ from ..utils import (
 
 
 class CBSNewsIE(CBSIE):
+    IE_NAME = 'cbsnews'
     IE_DESC = 'CBS News'
     _VALID_URL = r'https?://(?:www\.)?cbsnews\.com/(?:news|videos)/(?P<id>[\da-z_-]+)'
 
     _TESTS = [
         {
-            'url': 'http://www.cbsnews.com/news/tesla-and-spacex-elon-musks-industrial-empire/',
+            # 60 minutes
+            'url': 'http://www.cbsnews.com/news/artificial-intelligence-positioned-to-be-a-game-changer/',
             'info_dict': {
-                'id': 'tesla-and-spacex-elon-musks-industrial-empire',
-                'ext': 'flv',
-                'title': 'Tesla and SpaceX: Elon Musk\'s industrial empire',
-                'thumbnail': 'http://beta.img.cbsnews.com/i/2014/03/30/60147937-2f53-4565-ad64-1bdd6eb64679/60-0330-pelley-640x360.jpg',
-                'duration': 791,
+                'id': '_B6Ga3VJrI4iQNKsir_cdFo9Re_YJHE_',
+                'ext': 'mp4',
+                'title': 'Artificial Intelligence',
+                'description': 'md5:8818145f9974431e0fb58a1b8d69613c',
+                'thumbnail': r're:^https?://.*\.jpg$',
+                'duration': 1606,
+                'uploader': 'CBSI-NEW',
+                'timestamp': 1498431900,
+                'upload_date': '20170625',
             },
             'params': {
-                # rtmp download
+                # m3u8 download
                 'skip_download': True,
             },
-            'skip': 'Subscribers only',
         },
         {
             'url': 'http://www.cbsnews.com/videos/fort-hood-shooting-army-downplays-mental-illness-as-cause-of-attack/',
@@ -38,7 +43,7 @@ class CBSNewsIE(CBSIE):
                 'upload_date': '20140404',
                 'timestamp': 1396650660,
                 'uploader': 'CBSI-NEW',
-                'thumbnail': 're:^https?://.*\.jpg$',
+                'thumbnail': r're:^https?://.*\.jpg$',
                 'duration': 205,
                 'subtitles': {
                     'en': [{
@@ -51,6 +56,22 @@ class CBSNewsIE(CBSIE):
                 'skip_download': True,
             },
         },
+        {
+            # 48 hours
+            'url': 'http://www.cbsnews.com/news/maria-ridulph-murder-will-the-nations-oldest-cold-case-to-go-to-trial-ever-get-solved/',
+            'info_dict': {
+                'id': 'QpM5BJjBVEAUFi7ydR9LusS69DPLqPJ1',
+                'ext': 'mp4',
+                'title': 'Cold as Ice',
+                'description': 'Can a childhood memory of a friend\'s murder solve a 1957 cold case? "48 Hours" correspondent Erin Moriarty has the latest.',
+                'upload_date': '20170604',
+                'timestamp': 1496538000,
+                'uploader': 'CBSI-NEW',
+            },
+            'params': {
+                'skip_download': True,
+            },
+        },
     ]
 
     def _real_extract(self, url):
@@ -59,24 +80,31 @@ class CBSNewsIE(CBSIE):
         webpage = self._download_webpage(url, video_id)
 
         video_info = self._parse_json(self._html_search_regex(
-            r'(?:<ul class="media-list items" id="media-related-items"><li data-video-info|<div id="cbsNewsVideoPlayer" data-video-player-options)=\'({.+?})\'',
-            webpage, 'video JSON info'), video_id)
+            r'(?:<ul class="media-list items" id="media-related-items"[^>]*><li data-video-info|<div id="cbsNewsVideoPlayer" data-video-player-options)=\'({.+?})\'',
+            webpage, 'video JSON info', default='{}'), video_id, fatal=False)
 
-        item = video_info['item'] if 'item' in video_info else video_info
-        guid = item['mpxRefId']
-        return self._extract_video_info(guid)
+        if video_info:
+            item = video_info['item'] if 'item' in video_info else video_info
+        else:
+            state = self._parse_json(self._search_regex(
+                r'data-cbsvideoui-options=(["\'])(?P<json>{.+?})\1', webpage,
+                'playlist JSON info', group='json'), video_id)['state']
+            item = state['playlist'][state['pid']]
+
+        return self._extract_video_info(item['mpxRefId'], 'cbsnews')
 
 
 class CBSNewsLiveVideoIE(InfoExtractor):
+    IE_NAME = 'cbsnews:livevideo'
     IE_DESC = 'CBS News Live Videos'
-    _VALID_URL = r'https?://(?:www\.)?cbsnews\.com/live/video/(?P<id>[\da-z_-]+)'
+    _VALID_URL = r'https?://(?:www\.)?cbsnews\.com/live/video/(?P<id>[^/?#]+)'
 
     # Live videos get deleted soon. See http://www.cbsnews.com/live/ for the latest examples
     _TEST = {
         'url': 'http://www.cbsnews.com/live/video/clinton-sanders-prepare-to-face-off-in-nh/',
         'info_dict': {
             'id': 'clinton-sanders-prepare-to-face-off-in-nh',
-            'ext': 'flv',
+            'ext': 'mp4',
             'title': 'Clinton, Sanders Prepare To Face Off In NH',
             'duration': 334,
         },
@@ -84,25 +112,22 @@ class CBSNewsLiveVideoIE(InfoExtractor):
     }
 
     def _real_extract(self, url):
-        video_id = self._match_id(url)
+        display_id = self._match_id(url)
 
-        webpage = self._download_webpage(url, video_id)
+        video_info = self._download_json(
+            'http://feeds.cbsn.cbsnews.com/rundown/story', display_id, query={
+                'device': 'desktop',
+                'dvr_slug': display_id,
+            })
 
-        video_info = self._parse_json(self._html_search_regex(
-            r'data-story-obj=\'({.+?})\'', webpage, 'video JSON info'), video_id)['story']
-
-        hdcore_sign = 'hdcore=3.3.1'
-        f4m_formats = self._extract_f4m_formats(video_info['url'] + '&' + hdcore_sign, video_id)
-        if f4m_formats:
-            for entry in f4m_formats:
-                # URLs without the extra param induce an 404 error
-                entry.update({'extra_param_to_segment_url': hdcore_sign})
-        self._sort_formats(f4m_formats)
+        formats = self._extract_akamai_formats(video_info['url'], display_id)
+        self._sort_formats(formats)
 
         return {
-            'id': video_id,
+            'id': display_id,
+            'display_id': display_id,
             'title': video_info['headline'],
             'thumbnail': video_info.get('thumbnail_url_hd') or video_info.get('thumbnail_url_sd'),
             'duration': parse_duration(video_info.get('segmentDur')),
-            'formats': f4m_formats,
+            'formats': formats,
         }
